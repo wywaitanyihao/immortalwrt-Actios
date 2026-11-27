@@ -63,17 +63,18 @@ else
 	echo "WARNING: msm8916-thwc-ufi001c.dts not found, skip host DTS patch"
 fi
 
-# 默认把第二个 RTL8152B（eth1）也加入 br-lan
-mkdir -p files/etc/uci-defaults
-cat > files/etc/uci-defaults/99-lan-eth1 <<'UCI_EOF'
-#!/bin/sh
-# 双网卡 RTL8152B：eth0 默认已在 br-lan，这里补 eth1
-uci -q del_list network.@device[0].ports='eth1'
-uci add_list network.@device[0].ports='eth1'
-uci commit network
-exit 0
-UCI_EOF
-chmod 755 files/etc/uci-defaults/99-lan-eth1
+# UFI003 只有一个 USB-A 口（gadget/RNDIS 插电脑用），没有第二块板载 RTL8152B。
+# 原先往 br-lan 塞 eth1 是双网卡机型的错误套用，已移除。
+# 如果以后换成双网口机型需要 eth1 自动入桥，再恢复下面这段：
+# mkdir -p files/etc/uci-defaults
+# cat > files/etc/uci-defaults/99-lan-eth1 <<'UCI_EOF'
+# #!/bin/sh
+# uci -q del_list network.@device[0].ports='eth1'
+# uci add_list network.@device[0].ports='eth1'
+# uci commit network
+# exit 0
+# UCI_EOF
+# chmod 755 files/etc/uci-defaults/99-lan-eth1
 
 # 关闭 modem 接口的开机自动拉起（由 modem-retry 在 ModemManager 就绪后 ifup）
 if [ -d feeds/openstick ]; then
@@ -156,16 +157,13 @@ exit 0
 ORDER_EOF
 chmod 755 files/etc/uci-defaults/zz-modem-order
 
-# ufi003：内核直接 USB Host（与 qrzl903 共用 ufi001c 板级 DTS）
+# ufi003：复制 ufi001c 板级 DTS 作为本机型 DTS。
+# 关键：不要再追加 dr_mode="host" / 删除 extcon。
+# UFI003 的唯一 USB-A 口要用 gadget 模式（RNDIS/NCM 把网络共享给电脑），
+# 强制 host 会关掉 gadget，导致电脑端识别不到 USB 网卡。
+# 直接从 ufi001c 复制即保留其原本的 extcon + gadget 配置。
 if [ -f "$DTS_DIR/msm8916-thwc-ufi001c.dts" ]; then
 	cp "$DTS_DIR/msm8916-thwc-ufi001c.dts" "$DTS_DIR/msm8916-thwc-ufi003.dts"
-	cat >> "$DTS_DIR/msm8916-thwc-ufi003.dts" <<'DTS_EOF'
-
-&usb {
-	dr_mode = "host";
-	/delete-property/ extcon;
-};
-DTS_EOF
 	python3 - <<'PY' || exit 1
 p = 'target/linux/msm89xx/image/msm8916.mk'
 s = open(p).read()
